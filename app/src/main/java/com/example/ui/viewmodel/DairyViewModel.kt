@@ -149,6 +149,10 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setLanguage(lang: String) {
         _language.value = lang
+        // Update the live translation state immediately so every screen using L.t()
+        // recomposes right away, instead of only picking up the new language after
+        // the app is restarted (previously this only synced once, in init{}).
+        com.example.ui.screens.L.currentLang = lang
         prefs.edit().putString("language", lang).apply()
         com.example.ui.screens.L.currentLang = lang
     }
@@ -270,11 +274,27 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // AUTHENTICATION
-    fun login(username: String, passwordHash: String, rememberMe: Boolean) {
+    fun login(username: String, password: String, rememberMe: Boolean) {
         viewModelScope.launch {
             authError.value = null
             val user = repository.getUserByUsername(username)
-            if (user != null && user.passwordHash == passwordHash) {
+            if (user == null) {
+                authError.value = "Invalid username or password"
+                return@launch
+            }
+            val passwordMatches = if (com.example.data.security.PasswordHasher.isHashed(user.passwordHash)) {
+                com.example.data.security.PasswordHasher.verify(password, user.passwordHash)
+            } else {
+                // Legacy plaintext account (from before this fix). Verify against the
+                // old raw value, then transparently upgrade it to a salted hash so it
+                // is never stored in plaintext again.
+                val matches = user.passwordHash == password
+                if (matches) {
+                    repository.updateUserPasswordHash(user.id, com.example.data.security.PasswordHasher.hash(password))
+                }
+                matches
+            }
+            if (passwordMatches) {
                 _activeUser.value = user
                 repository.setRememberUser(user.id, rememberMe)
                 _currentScreen.value = Screen.Dashboard
@@ -285,7 +305,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun register(username: String, passwordHash: String, fullName: String, role: String, phone: String, email: String) {
+    fun register(username: String, password: String, fullName: String, role: String, phone: String, email: String) {
         viewModelScope.launch {
             authError.value = null
             val existing = repository.getUserByUsername(username)
@@ -295,7 +315,7 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
             }
             val newUser = UserEntity(
                 username = username,
-                passwordHash = passwordHash,
+                passwordHash = com.example.data.security.PasswordHasher.hash(password),
                 fullName = fullName,
                 role = role,
                 phone = phone,

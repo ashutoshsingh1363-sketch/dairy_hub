@@ -695,7 +695,7 @@ fun AuthScreen(viewModel: DairyViewModel) {
                     OutlinedTextField(
                         value = username,
                         onValueChange = { username = it },
-                        label = { Text("Username") },
+                        label = { Text(L.t("Username")) },
                         leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -707,7 +707,7 @@ fun AuthScreen(viewModel: DairyViewModel) {
                     OutlinedTextField(
                         value = password,
                         onValueChange = { password = it },
-                        label = { Text("Password") },
+                        label = { Text(L.t("Password")) },
                         leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
                         visualTransformation = PasswordVisualTransformation(),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -722,7 +722,7 @@ fun AuthScreen(viewModel: DairyViewModel) {
                         OutlinedTextField(
                             value = fullName,
                             onValueChange = { fullName = it },
-                            label = { Text("Full Name") },
+                            label = { Text(L.t("Full Name")) },
                             leadingIcon = { Icon(Icons.Default.Badge, contentDescription = null) },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
@@ -732,7 +732,7 @@ fun AuthScreen(viewModel: DairyViewModel) {
                         OutlinedTextField(
                             value = phone,
                             onValueChange = { phone = it },
-                            label = { Text("Phone Number") },
+                            label = { Text(L.t("Phone")) },
                             leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                             modifier = Modifier.fillMaxWidth(),
@@ -743,7 +743,7 @@ fun AuthScreen(viewModel: DairyViewModel) {
                         OutlinedTextField(
                             value = email,
                             onValueChange = { email = it },
-                            label = { Text("Email Address") },
+                            label = { Text(L.t("Email")) },
                             leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                             modifier = Modifier.fillMaxWidth(),
@@ -762,7 +762,7 @@ fun AuthScreen(viewModel: DairyViewModel) {
                                 value = selectedRole,
                                 onValueChange = {},
                                 readOnly = true,
-                                label = { Text("Assigned Access Role") },
+                                label = { Text(L.t("Role")) },
                                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -796,7 +796,7 @@ fun AuthScreen(viewModel: DairyViewModel) {
                                     checked = rememberMe,
                                     onCheckedChange = { rememberMe = it }
                                 )
-                                Text("Remember me", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                                Text(L.t("Remember Me"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
                             }
 
                             TextButton(
@@ -808,7 +808,7 @@ fun AuthScreen(viewModel: DairyViewModel) {
                                     }
                                 }
                             ) {
-                                Text("Forgot Password?", fontSize = 12.sp)
+                                Text(L.t("Forgot Password?"), fontSize = 12.sp)
                             }
                         }
                         Spacer(modifier = Modifier.height(16.dp))
@@ -830,7 +830,7 @@ fun AuthScreen(viewModel: DairyViewModel) {
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(
-                            text = if (isLoginMode) "Log In Securely" else "Register Enterprise Account",
+                            text = if (isLoginMode) L.t("Log In Securely") else L.t("Register Enterprise Account"),
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp
                         )
@@ -846,14 +846,16 @@ fun AuthScreen(viewModel: DairyViewModel) {
                         }
                     ) {
                         Text(
-                            text = if (isLoginMode) "New to DairyHub? Create an owner account" else "Have an account? Log in",
+                            text = if (isLoginMode) L.t("New to DairyHub? Create an owner account") else L.t("Have an account? Log in"),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
 
-                    // Bottom hints for Seed Demo Login
-                    if (isLoginMode) {
+                    // Bottom hints for Seed Demo Login — debug builds only. These are
+                    // real working demo credentials; showing them in a release build
+                    // would hand out live login access to anyone who opens the app.
+                    if (isLoginMode && com.example.BuildConfig.DEBUG) {
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -874,13 +876,13 @@ fun AuthScreen(viewModel: DairyViewModel) {
                 } else {
                     // Forgot Password OTP flow simulation
                     Text(
-                        text = "🔒 Enter OTP Verification Code",
+                        text = L.t("Enter OTP Verification Code"),
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "A temporary security OTP has been dispatched to $username registered endpoint.",
+                        text = L.t("A temporary security OTP has been dispatched to your registered endpoint."),
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                         textAlign = TextAlign.Center,
@@ -890,7 +892,7 @@ fun AuthScreen(viewModel: DairyViewModel) {
                     OutlinedTextField(
                         value = otpCode,
                         onValueChange = { if (it.length <= 6) otpCode = it },
-                        label = { Text("6-Digit OTP Code") },
+                        label = { Text(L.t("6-Digit OTP Code")) },
                         leadingIcon = { Icon(Icons.Default.Security, contentDescription = null) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth(),
@@ -903,7 +905,13 @@ fun AuthScreen(viewModel: DairyViewModel) {
                         onClick = {
                             if (otpCode.length >= 4) {
                                 otpSent = false
-                                viewModel.successMessage.value = "OTP Verified! Your temporary reset password is: owner123"
+                                // SECURITY FIX: this used to reveal the real seed account
+                                // password ("owner123") to anyone who typed any 4+ digit
+                                // code — a real password-reset flow requires a backend
+                                // (coming with the Firebase migration) to actually verify
+                                // and issue a one-time code. Until then, don't leak a
+                                // working password here.
+                                viewModel.successMessage.value = "OTP verified. Password reset requires backend support, coming soon — please contact your dairy admin for now."
                             } else {
                                 viewModel.authError.value = "Enter valid 6 digit OTP"
                             }
@@ -913,13 +921,13 @@ fun AuthScreen(viewModel: DairyViewModel) {
                             .height(48.dp),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("Verify Security OTP", fontWeight = FontWeight.Bold)
+                        Text(L.t("Verify Security OTP"), fontWeight = FontWeight.Bold)
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
 
                     TextButton(onClick = { otpSent = false }) {
-                        Text("Back to Login", fontSize = 12.sp)
+                        Text(L.t("Back to Login"), fontSize = 12.sp)
                     }
                 }
             }

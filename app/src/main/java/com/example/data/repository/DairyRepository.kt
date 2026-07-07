@@ -56,6 +56,10 @@ class DairyRepository(private val db: AppDatabase) {
         userDao.updateRememberMe(userId, remember)
     }
 
+    suspend fun updateUserPasswordHash(userId: Long, passwordHash: String) {
+        userDao.updatePasswordHash(userId, passwordHash)
+    }
+
     suspend fun checkUserExists(): Boolean {
         return userDao.getUserCount() > 0
     }

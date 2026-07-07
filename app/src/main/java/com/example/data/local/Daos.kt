@@ -21,6 +21,9 @@ interface UserDao {
     @Query("UPDATE users SET isRemembered = :remember WHERE id = :userId")
     suspend fun updateRememberMe(userId: Long, remember: Boolean)
 
+    @Query("UPDATE users SET passwordHash = :passwordHash WHERE id = :userId")
+    suspend fun updatePasswordHash(userId: Long, passwordHash: String)
+
     @Query("SELECT * FROM users ORDER BY id DESC")
     fun getAllUsersFlow(): Flow<List<UserEntity>>
 
