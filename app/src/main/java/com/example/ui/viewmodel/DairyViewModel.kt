@@ -162,7 +162,6 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         // the app is restarted (previously this only synced once, in init{}).
         com.example.ui.screens.L.currentLang = lang
         prefs.edit().putString("language", lang).apply()
-        com.example.ui.screens.L.currentLang = lang
     }
 
     fun setPrinterSize(size: String) {
