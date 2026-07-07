@@ -26,14 +26,7 @@ class MainActivity : ComponentActivity() {
             val isDarkTheme by viewModel.isDarkTheme.collectAsState()
 
             DairyHubTheme(darkTheme = isDarkTheme) {
-                Scaffold(
-                    modifier = Modifier.fillMaxSize(),
-                    containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background
-                ) { innerPadding ->
-                    Box(modifier = Modifier.padding(innerPadding)) {
-                        DairyHubApp(viewModel = viewModel)
-                    }
-                }
+                DairyHubApp(viewModel = viewModel)
             }
         }
     }

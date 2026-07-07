@@ -29,6 +29,14 @@ sealed class Screen {
 class DairyViewModel(application: Application) : AndroidViewModel(application) {
     private val database = AppDatabase.getDatabase(application, viewModelScope)
     private val repository = DairyRepository(database)
+    private val firestoreSyncManager = com.example.data.repository.FirestoreSyncManager(application)
+
+    // Firestore Sync Status
+    private val _isFirestoreSyncing = MutableStateFlow(false)
+    val isFirestoreSyncing: StateFlow<Boolean> = _isFirestoreSyncing.asStateFlow()
+
+    private val _firestoreSyncProgress = MutableStateFlow("")
+    val firestoreSyncProgress: StateFlow<String> = _firestoreSyncProgress.asStateFlow()
 
     // Current Screen
     private val _currentScreen = MutableStateFlow<Screen>(Screen.Auth)
@@ -354,7 +362,9 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
         openingBalance: Double = 0.0,
         customerType: String = "Farmer",
         paymentMode: String = "Cash",
-        isActive: Boolean = true
+        isActive: Boolean = true,
+        cowCount: Int = 0,
+        buffaloCount: Int = 0
     ) {
         viewModelScope.launch {
             val customer = CustomerEntity(
@@ -371,15 +381,32 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
                 balance = openingBalance,
                 customerType = customerType,
                 paymentMode = paymentMode,
-                isActive = isActive
+                isActive = isActive,
+                cowCount = cowCount,
+                buffaloCount = buffaloCount
             )
-            repository.addCustomer(customer, _activeUser.value)
+            val insertedId = repository.addCustomer(customer, _activeUser.value)
+            launch {
+                try {
+                    val finalCustomer = customer.copy(id = insertedId)
+                    firestoreSyncManager.uploadFarmers(listOf(finalCustomer), { _, _ -> }, {}, {})
+                } catch (e: Exception) {
+                    android.util.Log.e("DairyViewModel", "Background customer sync failed: ${e.message}")
+                }
+            }
         }
     }
 
     fun updateCustomer(customer: CustomerEntity) {
         viewModelScope.launch {
             repository.updateCustomer(customer, _activeUser.value)
+            launch {
+                try {
+                    firestoreSyncManager.uploadFarmers(listOf(customer), { _, _ -> }, {}, {})
+                } catch (e: Exception) {
+                    android.util.Log.e("DairyViewModel", "Background customer sync failed: ${e.message}")
+                }
+            }
         }
     }
 
@@ -453,7 +480,15 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
                 amount = amount,
                 milkType = milkType
             )
-            repository.addCollection(collection, _activeUser.value)
+            val insertedId = repository.addCollection(collection, _activeUser.value)
+            launch {
+                try {
+                    val finalCollection = collection.copy(id = insertedId)
+                    firestoreSyncManager.uploadProductionLogs(listOf(finalCollection), { _, _ -> }, {}, {})
+                } catch (e: Exception) {
+                    android.util.Log.e("DairyViewModel", "Background production log sync failed: ${e.message}")
+                }
+            }
         }
     }
 
@@ -546,6 +581,13 @@ class DairyViewModel(application: Application) : AndroidViewModel(application) {
     fun updateCollection(collection: MilkCollectionEntity) {
         viewModelScope.launch {
             repository.updateCollection(collection, _activeUser.value)
+            launch {
+                try {
+                    firestoreSyncManager.uploadProductionLogs(listOf(collection), { _, _ -> }, {}, {})
+                } catch (e: Exception) {
+                    android.util.Log.e("DairyViewModel", "Background production log sync failed: ${e.message}")
+                }
+            }
         }
     }
 
@@ -877,5 +919,107 @@ INSERT INTO products (name, category, price, stock_qty, unit) VALUES
         val timestamp = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
         val logLine = "[$timestamp] $method $endpoint\nReq: ${requestBody ?: "None"}\nRes: $responseBody"
         _apiLogs.value = (listOf(logLine) + _apiLogs.value).take(50)
+    }
+
+    // Firestore safe backup operation
+    fun backupDataToFirestore(onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            _isFirestoreSyncing.value = true
+            _firestoreSyncProgress.value = "Preparing local data..."
+            try {
+                val customers = repository.getAllCustomersList()
+                val collections = repository.allCollections.first()
+
+                _firestoreSyncProgress.value = "Uploading ${customers.size} customer profiles (with cattle records)..."
+                firestoreSyncManager.uploadFarmers(
+                    farmers = customers,
+                    onProgress = { current, total ->
+                        _firestoreSyncProgress.value = "Uploading farmers: $current / $total"
+                    },
+                    onSuccess = {
+                        viewModelScope.launch {
+                            _firestoreSyncProgress.value = "Farmers uploaded! Uploading ${collections.size} milk production logs..."
+                            firestoreSyncManager.uploadProductionLogs(
+                                logs = collections,
+                                onProgress = { current, total ->
+                                    _firestoreSyncProgress.value = "Uploading logs: $current / $total"
+                                },
+                                onSuccess = {
+                                    _isFirestoreSyncing.value = false
+                                    _firestoreSyncProgress.value = "Sync complete!"
+                                    viewModelScope.launch {
+                                        repository.logActivity(_activeUser.value?.role ?: "Admin", _activeUser.value?.username ?: "system", "Successfully backed up data to Cloud Firestore.")
+                                    }
+                                    onResult(true, "Successfully backed up ${customers.size} farmers & ${collections.size} milk production logs to Cloud Firestore.")
+                                },
+                                onFailure = { e ->
+                                    _isFirestoreSyncing.value = false
+                                    _firestoreSyncProgress.value = "Failed: ${e.message}"
+                                    onResult(false, "Failed to upload milk logs: ${e.localizedMessage}")
+                                }
+                            )
+                        }
+                    },
+                    onFailure = { e ->
+                        _isFirestoreSyncing.value = false
+                        _firestoreSyncProgress.value = "Failed: ${e.message}"
+                        onResult(false, "Failed to upload farmers: ${e.localizedMessage}")
+                    }
+                )
+            } catch (e: Exception) {
+                _isFirestoreSyncing.value = false
+                _firestoreSyncProgress.value = "Error: ${e.message}"
+                onResult(false, "Backup error: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    // Firestore safe restore operation
+    fun restoreDataFromFirestore(onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            _isFirestoreSyncing.value = true
+            _firestoreSyncProgress.value = "Connecting to Cloud Firestore..."
+            try {
+                firestoreSyncManager.downloadFarmers(
+                    onSuccess = { farmers ->
+                        viewModelScope.launch {
+                            _firestoreSyncProgress.value = "Downloaded ${farmers.size} farmers. Restoring to local database..."
+                            for (farmer in farmers) {
+                                database.customerDao().insertCustomer(farmer)
+                            }
+                            _firestoreSyncProgress.value = "Farmers restored. Connecting to retrieve logs..."
+                            firestoreSyncManager.downloadProductionLogs(
+                                onSuccess = { logs ->
+                                    viewModelScope.launch {
+                                        _firestoreSyncProgress.value = "Downloaded ${logs.size} production logs. Restoring locally..."
+                                        for (log in logs) {
+                                            database.collectionDao().insertCollection(log)
+                                        }
+                                        _isFirestoreSyncing.value = false
+                                        _firestoreSyncProgress.value = "Restore complete!"
+                                        repository.logActivity(_activeUser.value?.role ?: "Admin", _activeUser.value?.username ?: "system", "Successfully restored database from Cloud Firestore.")
+                                        onResult(true, "Successfully restored ${farmers.size} farmers and ${logs.size} milk logs from Firestore.")
+                                    }
+                                },
+                                onFailure = { e ->
+                                    _isFirestoreSyncing.value = false
+                                    _firestoreSyncProgress.value = "Failed: ${e.message}"
+                                    onResult(false, "Failed to retrieve production logs: ${e.localizedMessage}")
+                                }
+                            )
+                        }
+                    },
+                    onFailure = { e ->
+                        _isFirestoreSyncing.value = false
+                        _firestoreSyncProgress.value = "Failed: ${e.message}"
+                        onResult(false, "Failed to retrieve farmers: ${e.localizedMessage}")
+                    }
+                )
+            } catch (e: Exception) {
+                _isFirestoreSyncing.value = false
+                _firestoreSyncProgress.value = "Error: ${e.message}"
+                onResult(false, "Restore error: ${e.localizedMessage}")
+            }
+        }
     }
 }

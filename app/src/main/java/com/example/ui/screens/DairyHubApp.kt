@@ -2,7 +2,10 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -69,7 +72,12 @@ fun DairyHubApp(viewModel: DairyViewModel) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(
+                    start = innerPadding.calculateStartPadding(androidx.compose.ui.platform.LocalLayoutDirection.current),
+                    top = innerPadding.calculateTopPadding(),
+                    end = innerPadding.calculateEndPadding(androidx.compose.ui.platform.LocalLayoutDirection.current),
+                    bottom = 0.dp
+                )
         ) {
             when (currentScreen) {
                 is Screen.Auth -> {
@@ -128,6 +136,7 @@ fun ResponsiveAppLayout(
     content: @Composable () -> Unit
 ) {
     val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
+    val localContext = LocalContext.current
 
     val navItems = listOf(
         Triple(Screen.Dashboard, Icons.Default.Dashboard, "Dashboard"),
@@ -244,70 +253,190 @@ fun ResponsiveAppLayout(
                 }
 
                 // Bottom Navigation Bar (Sleek Floating iOS 26 Glass Dock)
+                var showVideosDialog by remember { mutableStateOf(false) }
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(Color.Transparent)
-                        .padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 2.dp)
+                        .padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 10.dp)
                         .navigationBarsPadding(),
                     contentAlignment = Alignment.Center
                 ) {
+                    val isDarkTheme by viewModel.isDarkTheme.collectAsStateWithLifecycle()
+                    val glassBg = if (isDarkTheme) Color(0xD9111E2E) else Color(0xD9FFFFFF)
+                    val glassBorder = if (isDarkTheme) Color(0xFF2563EB).copy(alpha = 0.25f) else Color(0xFF2563EB).copy(alpha = 0.15f)
+
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(64.dp),
-                        shape = RoundedCornerShape(28.dp),
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)),
-                        shadowElevation = 6.dp
+                            .height(68.dp),
+                        shape = RoundedCornerShape(34.dp),
+                        color = glassBg,
+                        border = BorderStroke(1.dp, glassBorder),
+                        shadowElevation = 8.dp
                     ) {
                         Row(
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp),
                             horizontalArrangement = Arrangement.SpaceAround,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            val mobileItems = listOf(
-                                Triple(Screen.Dashboard, Icons.Default.Home, "Home"),
-                                Triple(Screen.Collection, Icons.Default.WaterDrop, "Collect"),
-                                Triple(Screen.Sales, Icons.Default.ReceiptLong, "Sales"),
-                                Triple(Screen.Customers, Icons.Default.People, "Farmers"),
-                                Triple(Screen.Settings, Icons.Default.Settings, "Settings")
+                            // 1. Home
+                            val isHomeSelected = currentScreen == Screen.Dashboard
+                            BottomBarItem(
+                                icon = Icons.Default.Home,
+                                label = "Home",
+                                selected = isHomeSelected,
+                                isDark = isDarkTheme,
+                                modifier = Modifier.weight(1f),
+                                onClick = { viewModel.navigateTo(Screen.Dashboard) }
                             )
 
-                            mobileItems.forEach { (screen, icon, label) ->
-                                val selected = currentScreen == screen
-                                val activeColor = MaterialTheme.colorScheme.primary
-                                val inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                            // 2. Videos
+                            BottomBarItem(
+                                icon = Icons.Default.PlayCircle,
+                                label = "Videos",
+                                selected = showVideosDialog,
+                                isDark = isDarkTheme,
+                                modifier = Modifier.weight(1f),
+                                onClick = { showVideosDialog = true }
+                            )
 
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight()
-                                        .clickable { viewModel.navigateTo(screen) },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center
+                            // 3. WhatsApp
+                            BottomBarItem(
+                                icon = Icons.Default.Chat,
+                                label = "WhatsApp",
+                                selected = false,
+                                isDark = isDarkTheme,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    try {
+                                        val cleanedPhone = "6207159208"
+                                        val url = "https://api.whatsapp.com/send?phone=$cleanedPhone&text=Hello%20DairyHub%20Support%2C%20I%20need%20assistance."
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                        localContext.startActivity(intent)
+                                    } catch (e: Exception) {
+                                        Toast.makeText(localContext, "Could not open WhatsApp support", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            )
+
+                            // 4. Call
+                            BottomBarItem(
+                                icon = Icons.Default.Phone,
+                                label = "Call",
+                                selected = false,
+                                isDark = isDarkTheme,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    try {
+                                        val callIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:6207159208"))
+                                        localContext.startActivity(callIntent)
+                                    } catch (e: Exception) {
+                                        Toast.makeText(localContext, "Could not open dialer", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            )
+
+                            // 5. Refresh
+                            var isRefreshing by remember { mutableStateOf(false) }
+                            val rotationDegrees by animateFloatAsState(
+                                targetValue = if (isRefreshing) 360f else 0f,
+                                animationSpec = if (isRefreshing) {
+                                    infiniteRepeatable(
+                                        animation = tween(1000, easing = LinearEasing),
+                                        repeatMode = RepeatMode.Restart
+                                    )
+                                } else {
+                                    spring()
+                                },
+                                label = "RefreshRotate"
+                            )
+
+                            BottomBarItem(
+                                icon = Icons.Default.Refresh,
+                                label = "Refresh",
+                                selected = false,
+                                isDark = isDarkTheme,
+                                modifier = Modifier.graphicsLayer { rotationZ = rotationDegrees }.weight(1f),
+                                onClick = {
+                                    isRefreshing = true
+                                    // Room Database registers automatically auto-refresh via reactive Kotlin Flows
+                                    Toast.makeText(localContext, "SQLite database registers synchronized!", Toast.LENGTH_SHORT).show()
+                                    // Reset refresh state after 1 sec
+                                    val timer = Timer()
+                                    timer.schedule(object : TimerTask() {
+                                        override fun run() {
+                                            isRefreshing = false
+                                        }
+                                    }, 1000)
+                                }
+                            )
+                        }
+                    }
+                }
+
+                if (showVideosDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showVideosDialog = false },
+                        title = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.PlayCircle, contentDescription = null, tint = Color(0xFF2563EB))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("DairyHub Tutorials", fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        text = {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(
+                                    text = "Curated learning material for milk operators and admins:",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                                )
+                                
+                                val tutorials = listOf(
+                                    "How to Record Collections" to "2 mins • Setup Cow & Buffalo rates",
+                                    "Understanding Rate Charts" to "4 mins • FAT/SNF scale configuration",
+                                    "Printer Station Guide" to "3 mins • Bluetooth connection guide",
+                                    "Security & SQLite Backup" to "3 mins • Keeping local records safe"
+                                )
+
+                                tutorials.forEach { (title, meta) ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                            .clickable {
+                                                Toast.makeText(localContext, "Streaming tutorial: $title...", Toast.LENGTH_SHORT).show()
+                                            }
+                                            .padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(
-                                            imageVector = icon,
-                                            contentDescription = label,
-                                            tint = if (selected) activeColor else inactiveColor,
-                                            modifier = Modifier.size(24.dp)
+                                            imageVector = Icons.Default.PlayArrow,
+                                            contentDescription = null,
+                                            tint = Color(0xFF2563EB),
+                                            modifier = Modifier.size(18.dp)
                                         )
-                                        Spacer(modifier = Modifier.height(3.dp))
-                                        Text(
-                                            text = label,
-                                            fontSize = 10.sp,
-                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (selected) activeColor else inactiveColor
-                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Column {
+                                            Text(title, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                            Text(meta, fontSize = 10.sp, color = Color.Gray)
+                                        }
                                     }
                                 }
                             }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { showVideosDialog = false }) {
+                                Text("Dismiss")
+                            }
                         }
-                    }
+                    )
                 }
             }
         }
@@ -321,136 +450,151 @@ fun TopAppBarMobile(
     unreadCount: Int,
     onNotificationClick: () -> Unit
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth()
+    val isDarkTheme by viewModel.isDarkTheme.collectAsStateWithLifecycle()
+    val dairyProfile by viewModel.dairyProfile.collectAsStateWithLifecycle()
+    val dpVal = dairyProfile ?: com.example.data.model.DairyProfileEntity()
+    val language by viewModel.language.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    // Glass Background and border
+    val glassBg = if (isDarkTheme) Color(0xD9111E2E) else Color(0xD9F6F8FC)
+    val glassBorder = if (isDarkTheme) Color(0xFF2563EB).copy(alpha = 0.25f) else Color(0xFF2563EB).copy(alpha = 0.15f)
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .statusBarsPadding(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = glassBg),
+        border = BorderStroke(1.dp, glassBorder),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-                .statusBarsPadding(),
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                DairyHubLogo(
-                    logoSize = 38.dp,
-                    showText = false,
-                    textColor = MaterialTheme.colorScheme.onSurface
+            // Left: Logo
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(
+                        brush = Brush.linearGradient(
+                            colors = listOf(Color(0xFF2563EB), Color(0xFF14B8A6))
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.WaterDrop,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "Dairy",
-                        fontWeight = FontWeight.Black,
-                        fontSize = 20.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Hub",
-                        fontWeight = FontWeight.Black,
-                        fontSize = 20.sp,
-                        color = LogoGreen
-                    )
-                }
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Language Selector
-                var showLanguageDialog by remember { mutableStateOf(false) }
-                val language by viewModel.language.collectAsStateWithLifecycle()
-                IconButton(onClick = { showLanguageDialog = true }) {
-                    Icon(
-                        imageVector = Icons.Default.Language,
-                        contentDescription = "Select Language",
-                        tint = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-                if (showLanguageDialog) {
-                    val context = LocalContext.current
-                    AlertDialog(
-                        onDismissRequest = { showLanguageDialog = false },
-                        title = { Text(L.t("Select Language")) },
-                        text = {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                listOf("English", "Hindi (हिन्दी)", "Punjabi (ਪੰਜਾਬੀ)", "Marathi (मराठी)").forEach { opt ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                viewModel.setLanguage(opt)
-                                                showLanguageDialog = false
-                                                ToastUtil.show(context, "Language switched to $opt")
-                                            }
-                                            .padding(vertical = 12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        RadioButton(
-                                            selected = language == opt,
-                                            onClick = {
-                                                viewModel.setLanguage(opt)
-                                                showLanguageDialog = false
-                                                ToastUtil.show(context, "Language switched to $opt")
-                                            },
-                                            colors = RadioButtonDefaults.colors(selectedColor = Color(0xFF00A38B))
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(opt, fontSize = 15.sp)
-                                    }
-                                }
-                            }
-                        },
-                        confirmButton = {}
-                    )
-                }
+            Spacer(modifier = Modifier.width(8.dp))
 
-                Spacer(modifier = Modifier.width(4.dp))
+            // Center: Name and Code
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = dpVal.dairyName.ifEmpty { "Dairy Hub" },
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = if (isDarkTheme) Color.White else Color(0xFF111827)
+                )
+                Text(
+                    text = "ID: ${dpVal.signature.take(6).ifEmpty { "ASHU" }.uppercase()}",
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 10.sp,
+                    color = if (isDarkTheme) Color.White.copy(alpha = 0.6f) else Color(0xFF6B7280)
+                )
+            }
 
-                // Theme Toggle
-                val isDarkTheme by viewModel.isDarkTheme.collectAsStateWithLifecycle()
-                IconButton(onClick = { viewModel.toggleTheme() }) {
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Right Action Row
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // Theme toggle
+                IconButton(
+                    onClick = { viewModel.toggleTheme() },
+                    modifier = Modifier.size(32.dp)
+                ) {
                     Icon(
                         imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
-                        contentDescription = "Toggle Theme",
-                        tint = MaterialTheme.colorScheme.onSurface
+                        contentDescription = "Theme",
+                        tint = if (isDarkTheme) Color(0xFFF59E0B) else Color(0xFF6B7280),
+                        modifier = Modifier.size(18.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.width(4.dp))
-
-                // Notification Bell with Badge
-                IconButton(onClick = onNotificationClick) {
+                // Notification Bell
+                IconButton(
+                    onClick = onNotificationClick,
+                    modifier = Modifier.size(32.dp)
+                ) {
                     Box {
                         Icon(
                             imageVector = Icons.Default.Notifications,
                             contentDescription = "Notifications",
-                            tint = MaterialTheme.colorScheme.onSurface
+                            tint = if (isDarkTheme) Color.White else Color(0xFF111827),
+                            modifier = Modifier.size(18.dp)
                         )
                         if (unreadCount > 0) {
                             Box(
                                 modifier = Modifier
-                                    .size(10.dp)
+                                    .size(8.dp)
                                     .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.error)
+                                    .background(Color(0xFFEF4444))
                                     .align(Alignment.TopEnd)
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.width(4.dp))
-
-                // Profile Dialog Launcher / Logout
+                // Settings Icon
                 IconButton(
-                    onClick = { viewModel.logout() },
-                    modifier = Modifier.testTag("logout_mobile_button")
+                    onClick = { viewModel.navigateTo(Screen.Settings) },
+                    modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.ExitToApp,
-                        contentDescription = "Sign Out",
-                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Settings",
+                        tint = if (isDarkTheme) Color.White.copy(alpha = 0.8f) else Color(0xFF6B7280),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                // Profile Avatar Circular Button
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(
+                            brush = Brush.linearGradient(
+                                colors = listOf(Color(0xFF14B8A6), Color(0xFF2563EB))
+                            )
+                        )
+                        .clickable { viewModel.logout() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = (activeUser?.username?.take(1) ?: "U").uppercase(),
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        fontSize = 12.sp
                     )
                 }
             }
@@ -985,6 +1129,7 @@ fun DashboardScreen(viewModel: DairyViewModel) {
     
     // Form Dialog States
     var showQuickCollect by remember { mutableStateOf(false) }
+    var forceEveningShift by remember { mutableStateOf(false) }
     var showQuickSale by remember { mutableStateOf(false) }
     var showQuickAddFarmer by remember { mutableStateOf(false) }
     var showQuickAddCustomer by remember { mutableStateOf(false) }
@@ -1026,8 +1171,9 @@ fun DashboardScreen(viewModel: DairyViewModel) {
     // Global Center Detail fallbacks
     val dpVal = dairyProfile ?: com.example.data.model.DairyProfileEntity()
     
-    LazyColumn(
-        modifier = Modifier
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier
             .fillMaxSize()
             .background(
                 brush = Brush.verticalGradient(
@@ -1042,26 +1188,111 @@ fun DashboardScreen(viewModel: DairyViewModel) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
         contentPadding = PaddingValues(bottom = 80.dp, top = 16.dp)
     ) {
+        // F. LIQUID OPERATIONS QUICK ACTION PANEL (LIQUID DOCK)
+        item {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = L.t("Quick Actions Panel"),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(bottom = 10.dp)
+                )
+
+                // Grid containing 6 major operational buttons
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = { showQuickCollect = true },
+                            modifier = Modifier.weight(1f).height(46.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00A38B))
+                        ) {
+                            Icon(Icons.Default.WaterDrop, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(L.t("Quick Collect"), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = { showQuickSale = true },
+                            modifier = Modifier.weight(1f).height(46.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0091FF))
+                        ) {
+                            Icon(Icons.Default.Category, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(L.t("POS Sale"), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = { showQuickAddFarmer = true },
+                            modifier = Modifier.weight(1f).height(46.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C3E50))
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(L.t("Add Farmer"), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = { showQuickAddCustomer = true },
+                            modifier = Modifier.weight(1f).height(46.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7F8C8D))
+                        ) {
+                            Icon(Icons.Default.People, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(L.t("Add Customer"), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = { showRecordPayment = true },
+                            modifier = Modifier.weight(1f).height(46.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8E44AD))
+                        ) {
+                            Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(L.t("Record Payment"), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = { showRecordExpense = true },
+                            modifier = Modifier.weight(1f).height(46.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD35400))
+                        ) {
+                            Icon(Icons.Default.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(L.t("Record Expense"), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
         // A. SYSTEM OVERVIEW HEADER & GLOBAL UTILITIES
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(28.dp),
+                shape = RoundedCornerShape(24.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isDarkTheme) Color(0xFF1E2E2F).copy(alpha = 0.5f) else Color.White.copy(alpha = 0.7f)
+                    containerColor = if (isDarkTheme) Color(0xFF132223) else Color(0xFFF0FDFB)
                 ),
-                border = BorderStroke(1.dp, if (isDarkTheme) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.04f))
+                border = BorderStroke(1.dp, Color(0xFF00A38B).copy(alpha = 0.15f))
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
+                Column(modifier = Modifier.padding(18.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         // Dynamic Premium Logo Circle
                         Box(
                             modifier = Modifier
-                                .size(56.dp)
+                                .size(48.dp)
                                 .clip(CircleShape)
                                 .background(
                                     brush = Brush.linearGradient(
@@ -1074,7 +1305,7 @@ fun DashboardScreen(viewModel: DairyViewModel) {
                                 text = dpVal.dairyName.take(2).uppercase(),
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,
-                                fontSize = 20.sp
+                                fontSize = 18.sp
                             )
                         }
 
@@ -1082,62 +1313,40 @@ fun DashboardScreen(viewModel: DairyViewModel) {
                             Text(
                                 text = dpVal.dairyName,
                                 fontWeight = FontWeight.Black,
-                                fontSize = 22.sp,
+                                fontSize = 20.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = L.t("Smart Dairy, Strong Future"),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
+                                text = L.t("Smart Dairy, Strong Future") + " • " + L.t("Live ERP"),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF00A38B)
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Global details rows
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Default.Phone, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(14.dp))
-                            Text(text = dpVal.contactNumber, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f))
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Default.Email, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(14.dp))
-                            Text(text = dpVal.emailAddress, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f))
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Default.Payments, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(14.dp))
-                            Text(text = "UPI ID: " + dpVal.upiId, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f))
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Default.Info, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(14.dp))
-                            Text(text = "Manager: " + dpVal.ownerName, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f))
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     // Sync & Backup secure SQLite strip
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(10.dp))
                             .background(Color(0xFF00A38B).copy(alpha = 0.08f))
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(8.dp)
+                                .size(6.dp)
                                 .clip(CircleShape)
                                 .background(Color(0xFF00A38B))
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = L.t("SQLite Room Secure Database") + " | " + L.t("Backup Status") + ": " + L.t("Saved locally"),
+                            text = L.t("SQLite Room Secure Database") + " • " + L.t("Backup Status") + ": " + L.t("Saved locally"),
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.Medium,
                             color = Color(0xFF00A38B)
                         )
                     }
@@ -1330,90 +1539,6 @@ fun DashboardScreen(viewModel: DairyViewModel) {
 
 
 
-        // F. LIQUID OPERATIONS QUICK ACTION PANEL (LIQUID DOCK)
-        item {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = L.t("Quick Actions Panel"),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                    modifier = Modifier.padding(bottom = 10.dp)
-                )
-
-                // Grid containing 6 major operational buttons
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(
-                            onClick = { showQuickCollect = true },
-                            modifier = Modifier.weight(1f).height(46.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00A38B))
-                        ) {
-                            Icon(Icons.Default.WaterDrop, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(L.t("Quick Collect"), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                        Button(
-                            onClick = { showQuickSale = true },
-                            modifier = Modifier.weight(1f).height(46.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0091FF))
-                        ) {
-                            Icon(Icons.Default.Category, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(L.t("POS Sale"), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(
-                            onClick = { showQuickAddFarmer = true },
-                            modifier = Modifier.weight(1f).height(46.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C3E50))
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(L.t("Add Farmer"), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                        Button(
-                            onClick = { showQuickAddCustomer = true },
-                            modifier = Modifier.weight(1f).height(46.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7F8C8D))
-                        ) {
-                            Icon(Icons.Default.People, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(L.t("Add Customer"), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(
-                            onClick = { showRecordPayment = true },
-                            modifier = Modifier.weight(1f).height(46.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8E44AD))
-                        ) {
-                            Icon(Icons.Default.Payments, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(L.t("Record Payment"), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                        Button(
-                            onClick = { showRecordExpense = true },
-                            modifier = Modifier.weight(1f).height(46.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD35400))
-                        ) {
-                            Icon(Icons.Default.LocalShipping, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(L.t("Record Expense"), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-        }
 
         // G. COLLAPSIBLE ACCORDION PANELS FOR OPERATIONAL MODULES
         
@@ -1963,17 +2088,145 @@ fun DashboardScreen(viewModel: DairyViewModel) {
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(28.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isDarkTheme) Color(0xFF132223) else Color(0xFFF0FDFB)
+                    containerColor = if (isDarkTheme) Color(0xFF111E2E) else Color(0xFFF0F6FD)
                 ),
-                border = BorderStroke(1.dp, Color(0xFF00A38B).copy(alpha = 0.15f))
+                border = BorderStroke(1.dp, Color(0xFF2563EB).copy(alpha = 0.2f))
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Text(
                         text = L.t("Today's Operations Summary"),
-                        fontWeight = FontWeight.ExtraBold,
+                        fontWeight = FontWeight.Black,
                         fontSize = 16.sp,
-                        color = Color(0xFF00A38B)
+                        color = if (isDarkTheme) Color.White else Color(0xFF1E293B)
                     )
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // Premium today collection analytics
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isDarkTheme) Color(0xFF0F1A24) else Color.White
+                        ),
+                        border = BorderStroke(1.dp, Color(0xFF2563EB).copy(alpha = 0.15f))
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Left Column: Cow Milk Info
+                                val cowColls = todayCollections.filter { it.milkType.equals("Cow", ignoreCase = true) }
+                                val cowQty = cowColls.sumOf { it.quantity }
+                                val cowAmt = cowColls.sumOf { it.amount }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        imageVector = Icons.Default.WaterDrop,
+                                        contentDescription = "Cow Milk",
+                                        tint = Color(0xFF2563EB),
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Cow Milk", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                                    Text("${String.format("%.1f", cowQty)} L", fontSize = 14.sp, fontWeight = FontWeight.Black)
+                                    Text("₹${String.format("%.1f", cowAmt)}", fontSize = 11.sp, color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
+                                }
+
+                                // Divider
+                                Box(modifier = Modifier.width(1.dp).height(55.dp).background(Color.Gray.copy(alpha = 0.2f)))
+
+                                // Center Column: Buffalo Milk Info
+                                val bufColls = todayCollections.filter { it.milkType.equals("Buffalo", ignoreCase = true) }
+                                val bufQty = bufColls.sumOf { it.quantity }
+                                val bufAmt = bufColls.sumOf { it.amount }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        imageVector = Icons.Default.WaterDrop,
+                                        contentDescription = "Buffalo Milk",
+                                        tint = Color(0xFF14B8A6),
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Buffalo Milk", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                                    Text("${String.format("%.1f", bufQty)} L", fontSize = 14.sp, fontWeight = FontWeight.Black)
+                                    Text("₹${String.format("%.1f", bufAmt)}", fontSize = 11.sp, color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
+                                }
+
+                                // Divider
+                                Box(modifier = Modifier.width(1.dp).height(55.dp).background(Color.Gray.copy(alpha = 0.2f)))
+
+                                // Right Column: Shift Info
+                                val amQty = amCollections.sumOf { it.quantity }
+                                val pmQty = pmCollections.sumOf { it.quantity }
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(
+                                        imageVector = Icons.Default.AccessTime,
+                                        contentDescription = "Shifts",
+                                        tint = Color(0xFFF59E0B),
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Shift Records", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
+                                    Text("AM: ${String.format("%.1f", amQty)} L", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("PM: ${String.format("%.1f", pmQty)} L", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Statistic chips row
+                            val avgFat = if (todayCollections.isNotEmpty()) todayCollections.map { it.fat }.average() else 0.0
+                            val avgSnf = if (todayCollections.isNotEmpty()) todayCollections.map { it.snf }.average() else 0.0
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1.5f)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0xFF2563EB).copy(alpha = 0.1f))
+                                        .padding(vertical = 8.dp, horizontal = 10.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("TOTAL COLLECTED", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2563EB))
+                                        Text("${String.format("%.1f", todayCollectionQty)} L", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                                    }
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0xFF14B8A6).copy(alpha = 0.1f))
+                                        .padding(vertical = 8.dp, horizontal = 10.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("AVG FAT", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color(0xFF14B8A6))
+                                        Text("${String.format("%.2f", avgFat)} %", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                                    }
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0xFFF59E0B).copy(alpha = 0.1f))
+                                        .padding(vertical = 8.dp, horizontal = 10.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("AVG SNF", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = Color(0xFFF59E0B))
+                                        Text("${String.format("%.2f", avgSnf)} %", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // 2x4 Metric Grid for all Today's parameters
@@ -2022,6 +2275,248 @@ fun DashboardScreen(viewModel: DairyViewModel) {
                 }
             }
         }
+
+        // H. ENTERPRISE SYSTEM FOOTER
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp, bottom = 12.dp),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isDarkTheme) Color(0xFF111E1F) else Color(0xFFF9FBFB)
+                ),
+                border = BorderStroke(1.dp, Color(0xFF00A38B).copy(alpha = 0.08f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    // Logo & Slogan Row
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF00A38B).copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.WaterDrop,
+                                contentDescription = null,
+                                tint = Color(0xFF00A38B),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Text(
+                            text = dpVal.dairyName + " ERP Portal",
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+
+                    Text(
+                        text = "A secure, smart dairy enterprise resource planning system designed for seamless milk collections, instant digital invoice generation, and real-time ledger accounting.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        lineHeight = 15.sp
+                    )
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+
+                    // Two Column grid for metadata: Left = Owner/Contact, Right = Details
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1.5f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "SYSTEM MANAGER",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF00A38B),
+                                letterSpacing = 0.5.sp
+                            )
+                            Text(
+                                text = dpVal.ownerName,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(Icons.Default.Phone, contentDescription = null, tint = Color(0xFF0091FF), modifier = Modifier.size(12.dp))
+                                Text(text = dpVal.contactNumber, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f))
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(Icons.Default.Email, contentDescription = null, tint = Color(0xFFFF5252), modifier = Modifier.size(12.dp))
+                                Text(text = dpVal.emailAddress, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f))
+                            }
+                        }
+
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "ACCOUNT DETAILS",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF00A38B),
+                                letterSpacing = 0.5.sp
+                            )
+                            Text(
+                                text = "UPI ID: " + dpVal.upiId,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                            )
+                            Text(
+                                text = "PAN: " + dpVal.panNumber,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+
+                    // Address Info Section
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "OFFICIAL ADDRESS",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF00A38B),
+                            letterSpacing = 0.5.sp
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.LocationOn, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(12.dp))
+                            Text(
+                                text = dpVal.address,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                lineHeight = 14.sp
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+
+                    // License & Signature Keys
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "SIGNATURE KEY",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Gray
+                            )
+                            Text(
+                                text = dpVal.signature,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Text(
+                            text = "Licensed Version v4.1.1",
+                            fontSize = 10.sp,
+                            color = Color.Gray
+                        )
+                    }
+
+                    // Copyright & Disclaimers
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "© 2026 DairyHub Operations. All rights reserved.",
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            }
+        }
+    }
+        
+        // Floating "Add Evening Collection" capsule button with spring scaling
+        var isFabPressed by remember { mutableStateOf(false) }
+        val fabScale by animateFloatAsState(
+            targetValue = if (isFabPressed) 0.92f else 1f,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioMediumBouncy,
+                stiffness = Spring.StiffnessLow
+            ),
+            label = "FabScale"
+        )
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(bottom = 20.dp, end = 16.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .graphicsLayer {
+                        scaleX = fabScale
+                        scaleY = fabScale
+                    }
+                    .clip(RoundedCornerShape(32.dp))
+                    .background(
+                        brush = Brush.linearGradient(
+                            colors = listOf(Color(0xFF2563EB), Color(0xFF1D4ED8))
+                        )
+                    )
+                    .clickable {
+                        forceEveningShift = true
+                        showQuickCollect = true
+                    }
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onPress = {
+                                isFabPressed = true
+                                try {
+                                    tryAwaitRelease()
+                                } finally {
+                                    isFabPressed = false
+                                }
+                            }
+                        )
+                    }
+                    .padding(horizontal = 18.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.WaterDrop,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = L.t("Add Evening Collection"),
+                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 12.sp,
+                    color = Color.White
+                )
+            }
+        }
     }
 
     // ==============================================================
@@ -2031,7 +2526,7 @@ fun DashboardScreen(viewModel: DairyViewModel) {
     // 1. QUICK MILK COLLECTION DIALOG
     if (showQuickCollect) {
         var selectedFarmer by remember { mutableStateOf<CustomerEntity?>(null) }
-        var selectedShift by remember { mutableStateOf("Morning") }
+        var selectedShift by remember { mutableStateOf(if (forceEveningShift) "Evening" else "Morning") }
         var selectedMilkType by remember { mutableStateOf("Cow") }
         var qtyText by remember { mutableStateOf("") }
         var fatText by remember { mutableStateOf("4.0") }
@@ -2109,12 +2604,19 @@ fun DashboardScreen(viewModel: DairyViewModel) {
                         }
                     }
 
+                    val qError = qtyText.isNotEmpty() && (qtyText.toDoubleOrNull() == null || (qtyText.toDoubleOrNull() ?: 0.0) <= 0.0 || (qtyText.toDoubleOrNull() ?: 0.0) > 1000.0)
+                    val fError = fatText.isNotEmpty() && (fatText.toDoubleOrNull() == null || (fatText.toDoubleOrNull() ?: 0.0) < 1.5 || (fatText.toDoubleOrNull() ?: 0.0) > 15.0)
+                    val sError = snfText.isNotEmpty() && (snfText.toDoubleOrNull() == null || (snfText.toDoubleOrNull() ?: 0.0) < 5.0 || (snfText.toDoubleOrNull() ?: 0.0) > 15.0)
+                    val cError = clrText.isNotEmpty() && (clrText.toDoubleOrNull() == null || (clrText.toDoubleOrNull() ?: 0.0) < 10.0 || (clrText.toDoubleOrNull() ?: 0.0) > 45.0)
+
                     // Quantity, FAT, SNF, CLR Inputs
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         OutlinedTextField(
                             value = qtyText,
                             onValueChange = { qtyText = it },
                             label = { Text("Qty (L)") },
+                            isError = qError,
+                            supportingText = { if (qError) Text("Must be 0.1-1000", color = MaterialTheme.colorScheme.error) },
                             modifier = Modifier.weight(1f),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                         )
@@ -2122,6 +2624,8 @@ fun DashboardScreen(viewModel: DairyViewModel) {
                             value = fatText,
                             onValueChange = { fatText = it },
                             label = { Text("FAT (%)") },
+                            isError = fError,
+                            supportingText = { if (fError) Text("Range 1.5-15.0", color = MaterialTheme.colorScheme.error) },
                             modifier = Modifier.weight(1f),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                         )
@@ -2132,6 +2636,8 @@ fun DashboardScreen(viewModel: DairyViewModel) {
                             value = snfText,
                             onValueChange = { snfText = it },
                             label = { Text("SNF (%)") },
+                            isError = sError,
+                            supportingText = { if (sError) Text("Range 5.0-15.0", color = MaterialTheme.colorScheme.error) },
                             modifier = Modifier.weight(1f),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                         )
@@ -2139,6 +2645,8 @@ fun DashboardScreen(viewModel: DairyViewModel) {
                             value = clrText,
                             onValueChange = { clrText = it },
                             label = { Text("CLR") },
+                            isError = cError,
+                            supportingText = { if (cError) Text("Range 10-45", color = MaterialTheme.colorScheme.error) },
                             modifier = Modifier.weight(1f),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                         )
@@ -2175,8 +2683,14 @@ fun DashboardScreen(viewModel: DairyViewModel) {
                         
                         if (selectedFarmer == null) {
                             Toast.makeText(context, "Error: Choose a Farmer profile first", Toast.LENGTH_SHORT).show()
-                        } else if (fVal == null || sVal == null || qVal == null) {
-                            Toast.makeText(context, "Error: Enter valid quantity, FAT and SNF parameters", Toast.LENGTH_SHORT).show()
+                        } else if (qVal == null || qVal <= 0.0 || qVal > 1000.0) {
+                            Toast.makeText(context, "Error: Enter valid Quantity between 0.1 and 1000 Litres", Toast.LENGTH_SHORT).show()
+                        } else if (fVal == null || fVal < 1.5 || fVal > 15.0) {
+                            Toast.makeText(context, "Error: Enter valid FAT % between 1.5 and 15.0", Toast.LENGTH_SHORT).show()
+                        } else if (sVal == null || sVal < 5.0 || sVal > 15.0) {
+                            Toast.makeText(context, "Error: Enter valid SNF % between 5.0 and 15.0", Toast.LENGTH_SHORT).show()
+                        } else if (cVal < 10.0 || cVal > 45.0) {
+                            Toast.makeText(context, "Error: Enter valid CLR between 10.0 and 45.0", Toast.LENGTH_SHORT).show()
                         } else {
                             viewModel.addMilkCollection(
                                 customerId = selectedFarmer!!.id,
@@ -2189,6 +2703,7 @@ fun DashboardScreen(viewModel: DairyViewModel) {
                             )
                             Toast.makeText(context, "Recorded collection successfully!", Toast.LENGTH_SHORT).show()
                             showQuickCollect = false
+                            forceEveningShift = false
                         }
                     }
                 ) {
@@ -2196,7 +2711,7 @@ fun DashboardScreen(viewModel: DairyViewModel) {
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showQuickCollect = false }) {
+                TextButton(onClick = { showQuickCollect = false; forceEveningShift = false }) {
                     Text(L.t("Cancel"))
                 }
             }
@@ -2754,6 +3269,88 @@ fun DashboardScreen(viewModel: DairyViewModel) {
 // ==============================================================
 
 @Composable
+fun BottomBarItem(
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    isDark: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    var isPressed by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.85f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessLow
+        ),
+        label = "BottomBarPressScale"
+    )
+
+    val activeColor = Color(0xFF2563EB)
+    val inactiveColor = if (isDark) Color.White.copy(alpha = 0.5f) else Color(0xFF6B7280)
+
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        isPressed = true
+                        try {
+                            tryAwaitRelease()
+                        } finally {
+                            isPressed = false
+                        }
+                    },
+                    onTap = { onClick() }
+                )
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (selected) activeColor.copy(alpha = 0.15f) else Color.Transparent),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = if (selected) activeColor else inactiveColor,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = L.t(label),
+                fontSize = 9.sp,
+                fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.Medium,
+                color = if (selected) activeColor else inactiveColor
+            )
+            if (selected) {
+                // Active Dot Indicator
+                Box(
+                    modifier = Modifier
+                        .size(4.dp)
+                        .clip(CircleShape)
+                        .background(activeColor)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun SmallMetric(
     title: String,
     value: String,
@@ -3062,6 +3659,8 @@ fun CustomersScreen(viewModel: DairyViewModel) {
     var newCustomerType by remember { mutableStateOf("Farmer") }
     var newPaymentMode by remember { mutableStateOf("Cash") }
     var newIsActive by remember { mutableStateOf(true) }
+    var newCowCount by remember { mutableStateOf("0") }
+    var newBuffaloCount by remember { mutableStateOf("0") }
 
     // Form states (Edit)
     var editCustomer by remember { mutableStateOf<CustomerEntity?>(null) }
@@ -3080,6 +3679,8 @@ fun CustomersScreen(viewModel: DairyViewModel) {
     var editCustomerType by remember { mutableStateOf("Farmer") }
     var editPaymentMode by remember { mutableStateOf("Cash") }
     var editIsActive by remember { mutableStateOf(true) }
+    var editCowCount by remember { mutableStateOf("0") }
+    var editBuffaloCount by remember { mutableStateOf("0") }
 
     val filteredCustomers = customers.filter {
         it.name.contains(searchQuery, ignoreCase = true) || 
@@ -3137,6 +3738,8 @@ fun CustomersScreen(viewModel: DairyViewModel) {
                             editCustomerType = customer.customerType
                             editPaymentMode = customer.paymentMode
                             editIsActive = customer.isActive
+                            editCowCount = customer.cowCount.toString()
+                            editBuffaloCount = customer.buffaloCount.toString()
                             showEditDialog = true
                         }) {
                             Icon(Icons.Default.Edit, contentDescription = "Edit Profile", tint = MaterialTheme.colorScheme.primary)
@@ -3617,6 +4220,31 @@ fun CustomersScreen(viewModel: DairyViewModel) {
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.fillMaxWidth()
                         )
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            val cowsError = newCowCount.toIntOrNull() == null || (newCowCount.toIntOrNull() ?: 0) < 0
+                            val buffaloError = newBuffaloCount.toIntOrNull() == null || (newBuffaloCount.toIntOrNull() ?: 0) < 0
+                            
+                            OutlinedTextField(
+                                value = newCowCount,
+                                onValueChange = { newCowCount = it },
+                                label = { Text("Cow Count 🐄") },
+                                isError = cowsError,
+                                supportingText = { if (cowsError) Text("Must be >= 0", color = MaterialTheme.colorScheme.error) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f).testTag("new_customer_cow_count")
+                            )
+                            OutlinedTextField(
+                                value = newBuffaloCount,
+                                onValueChange = { newBuffaloCount = it },
+                                label = { Text("Buffalo Count 🦬") },
+                                isError = buffaloError,
+                                supportingText = { if (buffaloError) Text("Must be >= 0", color = MaterialTheme.colorScheme.error) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f).testTag("new_customer_buffalo_count")
+                            )
+                        }
+
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth()
@@ -3632,6 +4260,17 @@ fun CustomersScreen(viewModel: DairyViewModel) {
                     onClick = {
                         val fullName = "${newFirstName.trim()} ${newLastName.trim()}".trim()
                         if (fullName.isNotEmpty() && newPhone.isNotEmpty()) {
+                            val cowsVal = newCowCount.toIntOrNull()
+                            val buffaloVal = newBuffaloCount.toIntOrNull()
+                            if (cowsVal == null || cowsVal < 0 || buffaloVal == null || buffaloVal < 0) {
+                                Toast.makeText(context, "Error: Cow count and Buffalo count must be valid non-negative numbers", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            val balanceVal = newOpeningBalance.toDoubleOrNull()
+                            if (balanceVal == null) {
+                                Toast.makeText(context, "Error: Opening balance must be a valid number", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
                             viewModel.addCustomer(
                                 name = fullName,
                                 phone = newPhone,
@@ -3643,10 +4282,12 @@ fun CustomersScreen(viewModel: DairyViewModel) {
                                 branch = newBranch,
                                 accountNumber = newAccountNumber,
                                 ifsc = newIfsc,
-                                openingBalance = newOpeningBalance.toDoubleOrNull() ?: 0.0,
+                                openingBalance = balanceVal,
                                 customerType = newCustomerType,
                                 paymentMode = newPaymentMode,
-                                isActive = newIsActive
+                                isActive = newIsActive,
+                                cowCount = cowsVal,
+                                buffaloCount = buffaloVal
                             )
                             newCode = ""
                             newFirstName = ""
@@ -3660,6 +4301,8 @@ fun CustomersScreen(viewModel: DairyViewModel) {
                             newIfsc = ""
                             newAddress = ""
                             newOpeningBalance = "0.0"
+                            newCowCount = "0"
+                            newBuffaloCount = "0"
                             newCustomerType = "Farmer"
                             newPaymentMode = "Cash"
                             newIsActive = true
@@ -3829,6 +4472,31 @@ fun CustomersScreen(viewModel: DairyViewModel) {
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.fillMaxWidth()
                         )
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            val cowsError = editCowCount.toIntOrNull() == null || (editCowCount.toIntOrNull() ?: 0) < 0
+                            val buffaloError = editBuffaloCount.toIntOrNull() == null || (editBuffaloCount.toIntOrNull() ?: 0) < 0
+                            
+                            OutlinedTextField(
+                                value = editCowCount,
+                                onValueChange = { editCowCount = it },
+                                label = { Text("Cow Count 🐄") },
+                                isError = cowsError,
+                                supportingText = { if (cowsError) Text("Must be >= 0", color = MaterialTheme.colorScheme.error) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f).testTag("edit_customer_cow_count")
+                            )
+                            OutlinedTextField(
+                                value = editBuffaloCount,
+                                onValueChange = { editBuffaloCount = it },
+                                label = { Text("Buffalo Count 🦬") },
+                                isError = buffaloError,
+                                supportingText = { if (buffaloError) Text("Must be >= 0", color = MaterialTheme.colorScheme.error) },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f).testTag("edit_customer_buffalo_count")
+                            )
+                        }
+
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth()
@@ -3844,6 +4512,17 @@ fun CustomersScreen(viewModel: DairyViewModel) {
                     onClick = {
                         val fullName = "${editFirstName.trim()} ${editLastName.trim()}".trim()
                         if (fullName.isNotEmpty() && editPhone.isNotEmpty()) {
+                            val cowsVal = editCowCount.toIntOrNull()
+                            val buffaloVal = editBuffaloCount.toIntOrNull()
+                            if (cowsVal == null || cowsVal < 0 || buffaloVal == null || buffaloVal < 0) {
+                                Toast.makeText(context, "Error: Cow count and Buffalo count must be valid non-negative numbers", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            val balanceVal = editOpeningBalance.toDoubleOrNull()
+                            if (balanceVal == null) {
+                                Toast.makeText(context, "Error: Opening balance must be a valid number", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
                             val updatedCust = originalCust.copy(
                                 name = fullName,
                                 phone = editPhone,
@@ -3855,10 +4534,12 @@ fun CustomersScreen(viewModel: DairyViewModel) {
                                 branch = editBranch,
                                 accountNumber = editAccountNumber,
                                 ifsc = editIfsc,
-                                balance = editOpeningBalance.toDoubleOrNull() ?: originalCust.balance,
+                                balance = balanceVal,
                                 customerType = editCustomerType,
                                 paymentMode = editPaymentMode,
-                                isActive = editIsActive
+                                isActive = editIsActive,
+                                cowCount = cowsVal,
+                                buffaloCount = buffaloVal
                             )
                             viewModel.updateCustomer(updatedCust)
                             showEditDialog = false
@@ -4107,12 +4788,18 @@ fun CollectionScreen(viewModel: DairyViewModel) {
                         }
                     }
 
+                    val qError = qtyText.isNotEmpty() && (qtyText.toDoubleOrNull() == null || (qtyText.toDoubleOrNull() ?: 0.0) <= 0.0 || (qtyText.toDoubleOrNull() ?: 0.0) > 1000.0)
+                    val fError = fatText.isNotEmpty() && (fatText.toDoubleOrNull() == null || (fatText.toDoubleOrNull() ?: 0.0) < 1.5 || (fatText.toDoubleOrNull() ?: 0.0) > 15.0)
+                    val sError = snfText.isNotEmpty() && (snfText.toDoubleOrNull() == null || (snfText.toDoubleOrNull() ?: 0.0) < 5.0 || (snfText.toDoubleOrNull() ?: 0.0) > 15.0)
+
                     // Raw Metric Fields (Grid of inputs)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         OutlinedTextField(
                             value = fatText,
                             onValueChange = { fatText = it },
                             label = { Text("FAT %") },
+                            isError = fError,
+                            supportingText = { if (fError) Text("Range 1.5 - 15.0", color = MaterialTheme.colorScheme.error) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.weight(1f).testTag("fat_input"),
@@ -4122,6 +4809,8 @@ fun CollectionScreen(viewModel: DairyViewModel) {
                             value = snfText,
                             onValueChange = { snfText = it },
                             label = { Text("SNF %") },
+                            isError = sError,
+                            supportingText = { if (sError) Text("Range 5.0 - 15.0", color = MaterialTheme.colorScheme.error) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.weight(1f).testTag("snf_input"),
@@ -4133,6 +4822,8 @@ fun CollectionScreen(viewModel: DairyViewModel) {
                         value = qtyText,
                         onValueChange = { qtyText = it },
                         label = { Text("Quantity (Litres)") },
+                        isError = qError,
+                        supportingText = { if (qError) Text("Must be 0.1 - 1000", color = MaterialTheme.colorScheme.error) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth().testTag("qty_input"),
@@ -4168,12 +4859,24 @@ fun CollectionScreen(viewModel: DairyViewModel) {
                     Button(
                         onClick = {
                             val cust = selectedCustomer
+                            val qtyVal = qtyText.toDoubleOrNull()
+                            val fatVal = fatText.toDoubleOrNull()
+                            val snfVal = snfText.toDoubleOrNull()
+
                             if (cust == null) {
                                 Toast.makeText(context, "Please select a supplying farmer first!", Toast.LENGTH_SHORT).show()
                                 return@Button
                             }
-                            if (qty <= 0.0 || fat <= 0.0 || snf <= 0.0) {
-                                Toast.makeText(context, "FAT %, SNF %, and Quantity must be greater than zero!", Toast.LENGTH_SHORT).show()
+                            if (qtyVal == null || qtyVal <= 0.0 || qtyVal > 1000.0) {
+                                Toast.makeText(context, "Error: Enter valid Quantity between 0.1 and 1000 Litres!", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            if (fatVal == null || fatVal < 1.5 || fatVal > 15.0) {
+                                Toast.makeText(context, "Error: Enter valid FAT % between 1.5 and 15.0!", Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            if (snfVal == null || snfVal < 5.0 || snfVal > 15.0) {
+                                Toast.makeText(context, "Error: Enter valid SNF % between 5.0 and 15.0!", Toast.LENGTH_SHORT).show()
                                 return@Button
                             }
 
@@ -4448,10 +5151,16 @@ fun CollectionScreen(viewModel: DairyViewModel) {
                         }
                     }
 
+                    val qError = editQtyText.isNotEmpty() && (editQtyText.toDoubleOrNull() == null || (editQtyText.toDoubleOrNull() ?: 0.0) <= 0.0 || (editQtyText.toDoubleOrNull() ?: 0.0) > 1000.0)
+                    val fError = editFatText.isNotEmpty() && (editFatText.toDoubleOrNull() == null || (editFatText.toDoubleOrNull() ?: 0.0) < 1.5 || (editFatText.toDoubleOrNull() ?: 0.0) > 15.0)
+                    val sError = editSnfText.isNotEmpty() && (editSnfText.toDoubleOrNull() == null || (editSnfText.toDoubleOrNull() ?: 0.0) < 5.0 || (editSnfText.toDoubleOrNull() ?: 0.0) > 15.0)
+
                     OutlinedTextField(
                         value = editFatText,
                         onValueChange = { editFatText = it },
                         label = { Text("FAT %") },
+                        isError = fError,
+                        supportingText = { if (fError) Text("Range 1.5 - 15.0", color = MaterialTheme.colorScheme.error) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -4459,6 +5168,8 @@ fun CollectionScreen(viewModel: DairyViewModel) {
                         value = editSnfText,
                         onValueChange = { editSnfText = it },
                         label = { Text("SNF %") },
+                        isError = sError,
+                        supportingText = { if (sError) Text("Range 5.0 - 15.0", color = MaterialTheme.colorScheme.error) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -4466,6 +5177,8 @@ fun CollectionScreen(viewModel: DairyViewModel) {
                         value = editQtyText,
                         onValueChange = { editQtyText = it },
                         label = { Text("Quantity (Litres)") },
+                        isError = qError,
+                        supportingText = { if (qError) Text("Must be 0.1 - 1000", color = MaterialTheme.colorScheme.error) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -4474,13 +5187,21 @@ fun CollectionScreen(viewModel: DairyViewModel) {
             confirmButton = {
                 Button(
                     onClick = {
-                        val newFat = editFatText.toDoubleOrNull() ?: col.fat
-                        val newSnf = editSnfText.toDoubleOrNull() ?: col.snf
+                        val newFat = editFatText.toDoubleOrNull()
+                        val newSnf = editSnfText.toDoubleOrNull()
+                        val newQty = editQtyText.toDoubleOrNull()
                         val newClr = editClrText.toDoubleOrNull() ?: col.clr
-                        val newQty = editQtyText.toDoubleOrNull() ?: col.quantity
 
-                        if (newQty <= 0.0 || newFat <= 0.0 || newSnf <= 0.0) {
-                            Toast.makeText(context, "Values must be greater than zero!", Toast.LENGTH_SHORT).show()
+                        if (newQty == null || newQty <= 0.0 || newQty > 1000.0) {
+                            Toast.makeText(context, "Error: Enter valid Quantity between 0.1 and 1000 Litres!", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        if (newFat == null || newFat < 1.5 || newFat > 15.0) {
+                            Toast.makeText(context, "Error: Enter valid FAT % between 1.5 and 15.0!", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        if (newSnf == null || newSnf < 5.0 || newSnf > 15.0) {
+                            Toast.makeText(context, "Error: Enter valid SNF % between 5.0 and 15.0!", Toast.LENGTH_SHORT).show()
                             return@Button
                         }
 
@@ -6444,6 +7165,10 @@ fun SettingsScreen(viewModel: DairyViewModel) {
     var footerDialogTitle by remember { mutableStateOf("") }
     var footerDialogContent by remember { mutableStateOf("") }
 
+    var showFirestoreDialog by remember { mutableStateOf(false) }
+    val isFirestoreSyncing by viewModel.isFirestoreSyncing.collectAsStateWithLifecycle()
+    val firestoreSyncProgress by viewModel.firestoreSyncProgress.collectAsStateWithLifecycle()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -6607,6 +7332,15 @@ fun SettingsScreen(viewModel: DairyViewModel) {
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
 
+            // Firebase Firestore Sync Settings
+            SettingItemRow(
+                icon = Icons.Default.Sync,
+                title = "Firebase Firestore Sync",
+                statusText = "Online",
+                onClick = { showFirestoreDialog = true }
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+
             // About DairyHub Screen
             SettingItemRow(
                 icon = Icons.Default.Info,
@@ -6690,6 +7424,123 @@ fun SettingsScreen(viewModel: DairyViewModel) {
     // ========================================================
     // DIALOG IMPLEMENTATIONS FOR EACH SETTING
     // ========================================================
+
+    // Firebase Firestore Sync Dialog
+    if (showFirestoreDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!isFirestoreSyncing) showFirestoreDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Sync,
+                        contentDescription = null,
+                        tint = Color(0xFF00A38B),
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Firebase Firestore Sync", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Securely backup and retrieve your dairy farm records including cattle count data (cow/buffalo) and milk production logs directly to Cloud Firestore.",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+
+                    if (isFirestoreSyncing) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = Color(0xFF00A38B)
+                            )
+                            Text(
+                                text = firestoreSyncProgress,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF00A38B)
+                            )
+                        }
+                    } else {
+                        Surface(
+                            color = Color(0xFF00A38B).copy(alpha = 0.08f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = "🔒 Secured Storage Engine",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = Color(0xFF00A38B)
+                                )
+                                Text(
+                                    text = "All records are encrypted in transit and safely stored in Firestore collections with sub-millisecond query performance.",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                if (!isFirestoreSyncing) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.restoreDataFromFirestore { success, msg ->
+                                    ToastUtil.show(context, msg)
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            border = BorderStroke(1.dp, Color(0xFF00A38B)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00A38B))
+                        ) {
+                            Text("Restore")
+                        }
+
+                        Button(
+                            onClick = {
+                                viewModel.backupDataToFirestore { success, msg ->
+                                    ToastUtil.show(context, msg)
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00A38B))
+                        ) {
+                            Text("Backup")
+                        }
+                    }
+                } else {
+                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Text("Please wait, syncing with Cloud...", fontSize = 13.sp, color = Color.Gray)
+                    }
+                }
+            },
+            dismissButton = {
+                if (!isFirestoreSyncing) {
+                    TextButton(onClick = { showFirestoreDialog = false }) {
+                        Text("Close", color = Color.Gray)
+                    }
+                }
+            }
+        )
+    }
 
     // Social Media Settings Dialog
     if (showSocialDialog) {
@@ -7540,6 +8391,8 @@ fun QuickAddCustomerDialog(
     var openingBalance by remember { mutableStateOf("0.0") }
     var customerType by remember { mutableStateOf("Farmer") }
     var paymentMode by remember { mutableStateOf("Cash") }
+    var cowCount by remember { mutableStateOf("0") }
+    var buffaloCount by remember { mutableStateOf("0") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -7656,6 +8509,32 @@ fun QuickAddCustomerDialog(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    val cowsError = cowCount.toIntOrNull() == null || (cowCount.toIntOrNull() ?: 0) < 0
+                    val buffaloError = buffaloCount.toIntOrNull() == null || (buffaloCount.toIntOrNull() ?: 0) < 0
+                    
+                    OutlinedTextField(
+                        value = cowCount,
+                        onValueChange = { cowCount = it },
+                        label = { Text("Cow Count 🐄") },
+                        isError = cowsError,
+                        supportingText = { if (cowsError) Text("Must be >= 0", color = MaterialTheme.colorScheme.error) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f).testTag("quick_customer_cow_count"),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    OutlinedTextField(
+                        value = buffaloCount,
+                        onValueChange = { buffaloCount = it },
+                        label = { Text("Buffalo Count 🦬") },
+                        isError = buffaloError,
+                        supportingText = { if (buffaloError) Text("Must be >= 0", color = MaterialTheme.colorScheme.error) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f).testTag("quick_customer_buffalo_count"),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
             }
         },
         confirmButton = {
@@ -7663,8 +8542,18 @@ fun QuickAddCustomerDialog(
                 onClick = {
                     val fullName = "${firstName.trim()} ${lastName.trim()}".trim()
                     if (fullName.isNotEmpty() && phone.isNotEmpty()) {
+                        val cowsVal = cowCount.toIntOrNull()
+                        val buffaloVal = buffaloCount.toIntOrNull()
+                        if (cowsVal == null || cowsVal < 0 || buffaloVal == null || buffaloVal < 0) {
+                            Toast.makeText(context, "Error: Cow count and Buffalo count must be valid non-negative numbers", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        val bal = openingBalance.toDoubleOrNull()
+                        if (bal == null) {
+                            Toast.makeText(context, "Error: Opening balance must be a valid number", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
                         val finalCode = code.ifEmpty { "C-${System.currentTimeMillis().toString().takeLast(4)}" }
-                        val bal = openingBalance.toDoubleOrNull() ?: 0.0
                         viewModel.addCustomer(
                             name = fullName,
                             phone = phone,
@@ -7674,7 +8563,9 @@ fun QuickAddCustomerDialog(
                             openingBalance = bal,
                             customerType = customerType,
                             paymentMode = paymentMode,
-                            isActive = true
+                            isActive = true,
+                            cowCount = cowsVal,
+                            buffaloCount = buffaloVal
                         )
                         Toast.makeText(context, "Customer profile successfully registered", Toast.LENGTH_SHORT).show()
                         onSuccess(phone)

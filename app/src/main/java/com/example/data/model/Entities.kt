@@ -38,7 +38,9 @@ data class CustomerEntity(
     val ifsc: String = "",
     val customerType: String = "Farmer", // Farmer, Retailer, Wholesaler, Staff
     val paymentMode: String = "Cash", // Cash, UPI, Credit, Bank Transfer
-    val isActive: Boolean = true
+    val isActive: Boolean = true,
+    val cowCount: Int = 0,
+    val buffaloCount: Int = 0
 )
 
 @Entity(
